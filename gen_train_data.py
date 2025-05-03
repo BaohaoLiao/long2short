@@ -8,22 +8,21 @@ from tqdm import tqdm
 import torch
 from vllm import LLM, SamplingParams
 
-from utils.data import load_data, construct_prompt
+from utils.data import load_jsonl, construct_prompt
 from utils.parser import parse_question, parse_ground_truth, extract_and_verify_pred
 from utils.eval import majority_voting
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_names", default="math", type=str)
-    parser.add_argument("--data_dir", default="./datas", type=str)
+    parser.add_argument("--data_path", default=None, type=str)
     parser.add_argument("--model_name_or_path", default="gpt-4", type=str)
     parser.add_argument("--output_dir", default="./output", type=str)
     parser.add_argument("--prompt_type", default="deepseek-r1", type=str)
     parser.add_argument("--num_test_sample", default=-1, type=int)  # -1 for full data
-    parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--top_p", default=0.9, type=float)
-    parser.add_argument("--min_p", default=0.05, type=float)
+    parser.add_argument("--seed", default=0.6, type=int)
+    parser.add_argument("--top_p", default=0.95, type=float)
+    parser.add_argument("--min_p", default=0.0, type=float)
     parser.add_argument("--top_k", default=-1, type=int)
     parser.add_argument("--temperature", default=1.0, type=float)
     parser.add_argument("--max_tokens_per_call", default=2048, type=int)
@@ -33,6 +32,7 @@ def parse_args():
     parser.add_argument('--disable_chunked_prefill', action='store_true', default=False)
     parser.add_argument('--max_model_len', type=int, default=64000)
     parser.add_argument("--n_sampling", type=int, default=1)
+    parser.add_argument("--n_chunks", type=int, default=4)
 
     args = parser.parse_args()
     # top_p must be 1 when using greedy sampling (vllm)
@@ -51,13 +51,15 @@ def set_seed(seed: int = 42) -> None:
     print(f"Random seed set as {seed}")
 
 
-def prepare_data(data_name, args):
-    if "math500_level" in data_name:
-        level = int(data_name.strip()[-1])
-        examples = load_data("math500", args.data_dir)
-        examples = [example for example in examples if example["level"]==level]
-    else:
-        examples = load_data(data_name, args.data_dir)
+def prepare_data(args):
+    examples = list(load_jsonl(args.data_path))
+
+    # add 'idx' in the first column
+    if "idx" not in examples[0]:
+        examples = [{"idx": i, **example} for i, example in enumerate(examples)]
+
+    # dedepulicate & sort
+    examples = sorted(examples, key=lambda x: x["idx"])
 
     # sample `num_test_sample` from dataset for debug purpose
     if args.num_test_sample > 0:
@@ -65,12 +67,15 @@ def prepare_data(data_name, args):
 
     # get out_file name
     out_file_prefix = f"{args.prompt_type}_seed{args.seed}_t{args.temperature}topp{args.top_p}minp{args.min_p}topk{args.top_k}_len{args.max_tokens_per_call}"
-    output_dir = args.output_dir
-    if not os.path.exists(output_dir):
-        output_dir = f"outputs/{output_dir}"
-    out_file = f"{output_dir}/{data_name}/{out_file_prefix}_num{args.num_test_sample}_n{args.n_sampling}.json"
-    os.makedirs(f"{output_dir}/{data_name}", exist_ok=True)
+    out_file = f"{args.output_dir}/{out_file_prefix}_num{args.num_test_sample}_n{args.n_sampling}.json"
+    os.makedirs(f"{args.output_dir}", exist_ok=True)
     return examples, out_file
+
+
+def prepare_prompt(sample):
+    gts = 
+
+
 
 
 def setup(args):
@@ -90,37 +95,11 @@ def setup(args):
     tokenizer = llm.get_tokenizer()
 
     # infer & eval
-    data_list = args.data_names.split(",")
-    for data_name in data_list:
-        main(args, llm, tokenizer, data_name)
+    main(args, llm, tokenizer)
 
 
-def main(args, llm, tokenizer, data_name):
-    examples, out_file = prepare_data(data_name, args)
-    print("=" * 50)
-    print("data:", data_name, " , #samples:", len(examples))
-
-    samples = []
-    for i, example in tqdm(enumerate(examples), total=len(examples)):
-        idx = int(example["idx"])
-
-        # parse question and answer
-        example["question"] = parse_question(example, data_name)
-        if example["question"] == "":
-            continue
-        full_prompt = construct_prompt(example, args)
-
-        if i == 0:
-            print(full_prompt)
-
-        sample = {
-            "idx": idx,
-            "question": example["question"],
-            "gt": example["answer"],
-            "answer": example["answer"],
-            "prompt": full_prompt,
-        }
-        samples.append(sample)
+def main(args, llm, tokenizer):
+    samples, out_file = prepare_data(args)
 
     # start inference
     prompts = [sample["prompt"] for sample in samples]
@@ -146,8 +125,6 @@ def main(args, llm, tokenizer, data_name):
     results = []
     avg_acc = []
     avg_maj_acc = []
-    avg_correct_lens = []
-    avg_wrong_lens = []
     for sample, output in zip(samples, outputs):
         gt = parse_ground_truth(sample, data_name)
 
@@ -160,12 +137,6 @@ def main(args, llm, tokenizer, data_name):
             else:
                 model_output = o.text
             pred, score = extract_and_verify_pred(model_output, gt, data_name)
-
-            if score:
-                avg_correct_lens.append(len(tokenizer.encde(o.text)))
-            else:
-                avg_wrong_lens.append(len(tokenizer.encde(o.text)))
-
             preds.append(pred)
             scores.append(score)
         avg_acc.append(np.mean(scores))
@@ -192,9 +163,6 @@ def main(args, llm, tokenizer, data_name):
         "pass@1": np.mean(avg_acc),
         f"maj@{args.n_sampling}": np.mean(avg_maj_acc),
         "time_use_in_min": time_use,
-        "avg_len": np.mean(avg_correct_lens + avg_wrong_lens),
-        "avg_correct_len": np.mean(avg_correct_lens),
-        "avg_wrong_len": np.mean(avg_wrong_lens),
     }
     print(result_json)
 
