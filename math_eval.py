@@ -161,10 +161,11 @@ def main(args, llm, tokenizer, data_name):
                 model_output = o.text
             pred, score = extract_and_verify_pred(model_output, gt, data_name)
 
+            length = len(tokenizer.encode(o.text))
             if score:
-                avg_correct_lens.append(len(tokenizer.encde(o.text)))
+                avg_correct_lens.append(length)
             else:
-                avg_wrong_lens.append(len(tokenizer.encde(o.text)))
+                avg_wrong_lens.append(length)
 
             preds.append(pred)
             scores.append(score)
