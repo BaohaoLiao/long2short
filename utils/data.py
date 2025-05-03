@@ -7,7 +7,7 @@ from typing import Iterable, Union, Any
 PROMPT_TEMPLATES = {
     "deepseek-r1": (
         "<｜begin▁of▁sentence｜><｜User｜>Question: {input}\n\n"
-        "Please reason step by step, and put your final answer within \\boxed{}.<｜Assistant｜><think>\n"
+        "Please reason step by step, and put your final answer within \\boxed{{}}.<｜Assistant｜><think>\n"
     ),
     "deepseek-r1-choice": (   # For multiple choice question
         "<｜begin▁of▁sentence｜>"
@@ -18,7 +18,7 @@ PROMPT_TEMPLATES = {
     ),
     "qwen3-think": (
         "<|im_start|>system<|im_end|>\n"
-        "<|im_start|>user\nQuestion: {input}\n\nPlease reason step by step, and put your final answer within \\boxed{}.<|im_end|>\n"
+        "<|im_start|>user\nQuestion: {input}\n\nPlease reason step by step, and put your final answer within \\boxed{{}}.<|im_end|>\n"
         "<|im_start|>assistant\n<think>\n"
     ),
     "qwen3-think-choice": (
