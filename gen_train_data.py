@@ -65,7 +65,7 @@ def prepare_data(args):
         examples = examples[: args.num_test_sample]
 
     # get out_file name
-    out_file_prefix = f"{args.prompt_type}_seed{args.seed}_t{args.temperature}topp{args.top_p}minp{args.min_p}topk{args.top_k}_len{args.max_tokens_per_call}"
+    out_file_prefix = f"{args.prompt_type}_seed{args.seed}_t{args.temperature}topp{args.top_p}minp{args.min_p}topk{args.top_k}_len{args.max_tokens_per_call}_chunks{args.n_chunks}"
     out_file = f"{args.output_dir}/{out_file_prefix}_num{args.num_test_sample}_n{args.n_sampling}.json"
     os.makedirs(f"{args.output_dir}", exist_ok=True)
     return examples, out_file
