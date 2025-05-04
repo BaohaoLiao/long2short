@@ -119,7 +119,10 @@ def main(args, llm, tokenizer):
             print(full_prompt)
         sample["prompt"] = full_prompt
 
-        prompts += prepare_prompt(sample, args.n_chunks, tokenizer)
+        inputs = prepare_prompt(sample, args.n_chunks, tokenizer)
+        sample["input"] = inputs
+
+        prompts += inputs
 
     # Inf
     start_time = time.time()
@@ -168,6 +171,7 @@ def main(args, llm, tokenizer):
                 "pred": preds,
                 "score": scores,
                 "gen": sample["gen"],
+                "input": sample["input"],
                 "model_output": model_output,
             }
         )
