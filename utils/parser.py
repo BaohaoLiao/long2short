@@ -19,7 +19,7 @@ def parse_question(example, data_name):
     return question.strip()
 
 
-def parse_ground_truth(example: Dict[str, Any], data_name):
+def parse_ground_truth(example: Dict[str, Any], data_name="math500"):
     if data_name in [
         "math", "math500", "math500_level1", "math500_level2", 
         "math500_level3", "math500_level4", "math500_level5",
@@ -53,7 +53,7 @@ def extract_pred_and_parse(completion, data_name):
     return pred
 
 
-def extract_and_verify_pred(completion, gt, data_name):
+def extract_and_verify_pred(completion, gt, data_name="math500"):
     pred = extract_pred_and_parse(completion, data_name)
     score = verify(gt, pred)
     if pred:

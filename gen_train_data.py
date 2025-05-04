@@ -9,8 +9,7 @@ import torch
 from vllm import LLM, SamplingParams
 
 from utils.data import load_jsonl, construct_prompt
-from utils.parser import parse_question, parse_ground_truth, extract_and_verify_pred
-from utils.eval import majority_voting
+from utils.parser import parse_ground_truth, extract_and_verify_pred
 
 
 def parse_args():
@@ -72,10 +71,21 @@ def prepare_data(args):
     return examples, out_file
 
 
-def prepare_prompt(sample):
-    gts = 
+def prepare_prompt(sample, n_chunks, tokenizer):
+    prompt = sample["prompt"]
+    gen = sample["gen"]
+    thinking_chunks = ["\n</think>\n"]
 
-
+    thinking = gen.split("<think>")[-1]
+    if "</think>" in thinking:
+        thinking = thinking.split("</think>")[0].strip()
+    
+    tok_thinking = tokenizer.encode(thinking)[1:]
+    chunk_len = len(tok_thinking) // n_chunks
+    for i in range(1, n_chunks):
+        thinking_chunks.append(tokenizer.decode(tok_thinking[:i*chunk_len]) + "\n</think>\n")
+    
+    return [prompt + thinking_chunk for thinking_chunk in thinking_chunks]
 
 
 def setup(args):
@@ -101,8 +111,17 @@ def setup(args):
 def main(args, llm, tokenizer):
     samples, out_file = prepare_data(args)
 
-    # start inference
-    prompts = [sample["prompt"] for sample in samples]
+    prompts = []
+    for i, sample in tqdm(enumerate(samples), total=len(samples)):
+        sample["question"] = sample["question"].strip()
+        full_prompt = construct_prompt(sample, args)
+        if i == 0:
+            print(full_prompt)
+        sample["prompt"] = full_prompt
+
+        prompts += prepare_prompt(sample, args.n_chunks, tokenizer)
+
+    # Inf
     start_time = time.time()
     outputs = llm.generate(
         prompts,
@@ -118,42 +137,38 @@ def main(args, llm, tokenizer):
         ),
     )
     outputs = sorted(outputs, key=lambda x: int(x.request_id))
-    assert len(outputs) == len(prompts)
+    assert len(outputs) == len(samples) * args.n_chunks
     end_time = time.time()
+
+    # Reformat
+    model_outputs = []
+    for i in range(len(samples)):
+        model_outputs.append([output.outputs[0].text for output in outputs[i*args.n_chunks:(i+1)*args.n_chunks]])
 
     # Extract pred and eval
     results = []
     avg_acc = []
-    avg_maj_acc = []
-    for sample, output in zip(samples, outputs):
-        gt = parse_ground_truth(sample, data_name)
+    for sample, model_output in zip(samples, model_outputs):
+        gt = parse_ground_truth(sample)
 
         preds = []
         scores = []
-        for o in output.outputs:
-            # Avoid the bug in math_verify for multiple boxeds
-            if "</think>" in o.text:
-                model_output = o.text.split("</think>")[-1]
-            else:
-                model_output = o.text
-            pred, score = extract_and_verify_pred(model_output, gt, data_name)
+        for o in model_output:
+            pred, score = extract_and_verify_pred(model_output, gt)
             preds.append(pred)
             scores.append(score)
         avg_acc.append(np.mean(scores))
 
-        maj_pred, maj_score = majority_voting(preds, scores)
-        avg_maj_acc.append(maj_score)
-
         results.append(
             {
+                "ori_ind": sample["ori_ind"],
                 "idx": sample["idx"],
                 "question": sample["question"],
-                "gt": str(sample["answer"]),
+                "answer": str(sample["answer"]),
                 "pred": preds,
                 "score": scores,
-                "maj_pred": maj_pred,
-                "maj_score": maj_score,
-                "model_output": [o.text for o in output.outputs],
+                "gen": sample["gen"],
+                "model_output": model_output,
             }
         )
 
@@ -161,12 +176,11 @@ def main(args, llm, tokenizer):
     result_json = {
         "num_samples": len(samples),
         "pass@1": np.mean(avg_acc),
-        f"maj@{args.n_sampling}": np.mean(avg_maj_acc),
         "time_use_in_min": time_use,
     }
     print(result_json)
 
-    print(f"Saving model outputs for {data_name} to {out_file}")
+    print(f"Saving model outputs to {out_file}")
     json.dump(results, open(out_file, "w",), indent=4)
 
     with open(out_file.replace(".json", f"_metrics.json"), "w") as f:
