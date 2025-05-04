@@ -154,7 +154,7 @@ def main(args, llm, tokenizer):
         preds = []
         scores = []
         for o in model_output:
-            pred, score = extract_and_verify_pred(model_output, gt)
+            pred, score = extract_and_verify_pred(o, gt)
             preds.append(pred)
             scores.append(score)
         avg_acc.append(np.mean(scores))
