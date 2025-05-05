@@ -143,9 +143,9 @@ def main(args, llm, tokenizer, data_name):
     )
 
     think_model_outputs = []
-    for sample_outputs in think_outputs:
+    for sample_output in think_outputs:
         tmp = []
-        for output in sample_outputs:
+        for output in sample_output.outputs:
             if "</think>" in output.text:
                 tmp.append(output.text)
             else:
